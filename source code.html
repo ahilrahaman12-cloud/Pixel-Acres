@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Acres - Enhanced Indie Edition</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1c23;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #ecf0f1;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.6);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 4px solid #2c3e50;
+        }
+        canvas {
+            display: block;
+            background: #476930;
+        }
+        #hud {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+        }
+        .hud-card {
+            background: rgba(26, 28, 35, 0.85);
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            border: 2px solid #f1c40f;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        #toolbar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            background: rgba(26, 28, 35, 0.9);
+            padding: 10px;
+            border-radius: 12px;
+            border: 2px solid #d35400;
+            gap: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+        }
+        .tool-slot {
+            width: 70px;
+            height: 70px;
+            background: #2c3e50;
+            border: 3px solid #7f8c8d;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .tool-slot:hover {
+            background: #34495e;
+            border-color: #bdc3c7;
+            transform: translateY(-2px);
+        }
+        .tool-slot.active {
+            background: #e67e22;
+            border-color: #f1c40f;
+            transform: scale(1.1) translateY(-4px);
+            box-shadow: 0 5px 10px rgba(230, 126, 34, 0.4);
+        }
+        .tool-icon {
+            font-size: 26px;
+            margin-bottom: 4px;
+        }
+        #instructions {
+            margin-top: 20px;
+            text-align: center;
+            max-width: 650px;
+            font-size: 14px;
+            color: #95a5a6;
+            line-height: 1.5;
+            background: rgba(0,0,0,0.2);
+            padding: 12px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1 style="margin: 0 0 15px 0; color: #f1c40f; letter-spacing: 2px; text-shadow: 2px 2px #d35400;">🌾 PIXEL ACRES 🌾</h1>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        
+        <div id="hud">
+            <div id="gold-display" class="hud-card">💰 Gold: <span id="gold-val">100</span></div>
+            <div id="crop-display" class="hud-card">🌾 Harvested: <span id="harvest-val">0</span></div>
+        </div>
+
+        <div id="toolbar">
+            <div class="tool-slot active" onclick="selectTool('hoe', 0)">
+                <span class="tool-icon">⛏️</span><span>Hoe</span>
+            </div>
+            <div class="tool-slot" onclick="selectTool('seeds', 1)">
+                <span class="tool-icon">🌱</span><span>Seeds ($10)</span>
+            </div>
+            <div class="tool-slot" onclick="selectTool('water', 2)">
+                <span class="tool-icon">💧</span><span>Water</span>
+            </div>
+            <div class="tool-slot" onclick="selectTool('scythe', 3)">
+                <span class="tool-icon">🌾</span><span>Scythe</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="instructions">
+        <strong>Controls:</strong> <span style="color:#f1c40f">W, A, S, D</span> or <span style="color:#f1c40f">Arrow Keys</span> to Move. Press <span style="color:#f1c40f">SPACEBAR</span> to use tool.<br>
+        Watch your step! The farmer features walking leg animations, and crops display 4 distinct high-detail visual growth phases from seed to mature wheat.
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game State
+        let player = {
+            x: 400,
+            y: 250,
+            width: 32,
+            height: 42,
+            speed: 3.5,
+            gold: 100,
+            totalHarvested: 0,
+            isMoving: false,
+            animTimer: 0,
+            facingLeft: false
+        };
+
+        let currentTool = 'hoe';
+        const TILE_SIZE = 50;
+        const GRID_ROWS = 6;
+        const GRID_COLS = 10;
+        
+        const GRID_OFFSET_X = 150;
+        const GRID_OFFSET_Y = 100;
+
+        let farmPlots = [];
+        for (let r = 0; r < GRID_ROWS; r++) {
+            for (let c = 0; c < GRID_COLS; c++) {
+                farmPlots.push({
+                    row: r,
+                    col: c,
+                    x: GRID_OFFSET_X + (c * TILE_SIZE),
+                    y: GRID_OFFSET_Y + (r * TILE_SIZE),
+                    status: 'grass', 
+                    watered: false,
+                    growth: 0,       
+                    maxGrowth: 100
+                });
+            }
+        }
+
+        // Input Handling
+        let keys = {};
+        window.addEventListener('keydown', e => {
+            if(e.code === 'Space') e.preventDefault();
+            keys[e.code] = true;
+        });
+        window.addEventListener('keyup', e => {
+            if (e.code === 'Space') useTool();
+            keys[e.code] = false;
+        });
+
+        function selectTool(toolType, index) {
+            currentTool = toolType;
+            const slots = document.querySelectorAll('.tool-slot');
+            slots.forEach(slot => slot.classList.remove('active'));
+            slots[index].classList.add('active');
+        }
+
+        function updateUI() {
+            document.getElementById('gold-val').innerText = player.gold;
+            document.getElementById('harvest-val').innerText = player.totalHarvested;
+        }
+
+        function useTool() {
+            let playerCenterX = player.x + player.width / 2;
+            let playerCenterY = player.y + player.height / 2;
+
+            let targetPlot = farmPlots.find(plot => {
+                return playerCenterX >= plot.x && playerCenterX < plot.x + TILE_SIZE &&
+                       playerCenterY >= plot.y && playerCenterY < plot.y + TILE_SIZE;
+            });
+
+            if (!targetPlot) return;
+
+            if (currentTool === 'hoe' && targetPlot.status === 'grass') {
+                targetPlot.status = 'tilled';
+            } 
+            else if (currentTool === 'seeds' && targetPlot.status === 'tilled') {
+                if (player.gold >= 10) {
+                    player.gold -= 10;
+                    targetPlot.status = 'planted';
+                    targetPlot.growth = 0;
+                    updateUI();
+                }
+            } 
+            else if (currentTool === 'water' && (targetPlot.status === 'tilled' || targetPlot.status === 'planted')) {
+                targetPlot.watered = true;
+            } 
+            else if (currentTool === 'scythe' && targetPlot.status === 'planted' && targetPlot.growth >= targetPlot.maxGrowth) {
+                targetPlot.status = 'tilled';
+                targetPlot.watered = false;
+                targetPlot.growth = 0;
+                player.gold += 25; 
+                player.totalHarvested += 1;
+                updateUI();
+            }
+        }
+
+        function update() {
+            player.isMoving = false;
+            let dx = 0;
+            let dy = 0;
+
+            if (keys['KeyW'] || keys['ArrowUp']) dy -= player.speed;
+            if (keys['KeyS'] || keys['ArrowDown']) dy += player.speed;
+            if (keys['KeyA'] || keys['ArrowLeft']) { dx -= player.speed; player.facingLeft = true; }
+            if (keys['KeyD'] || keys['ArrowRight']) { dx += player.speed; player.facingLeft = false; }
+
+            if (dx !== 0 || dy !== 0) {
+                player.isMoving = true;
+                player.animTimer += 0.15;
+                player.x += dx;
+                player.y += dy;
+            } else {
+                player.animTimer = 0; // Reset animation cycle when standing still
+            }
+
+            // Canvas Boundaries
+            if (player.x < 0) player.x = 0;
+            if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+            if (player.y < 0) player.y = 0;
+            if (player.y > canvas.height - player.height) player.y = canvas.height - player.height;
+
+            // Crop Growth Simulation
+            farmPlots.forEach(plot => {
+                if (plot.status === 'planted' && plot.watered && plot.growth < plot.maxGrowth) {
+                    plot.growth += 0.12; 
+                    if (plot.growth >= plot.maxGrowth) plot.growth = plot.maxGrowth;
+                }
+            });
+        }
+
+        // --- ARTISTIC RENDER ENGINE ---
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 1. Draw stylized grass field background
+            ctx.fillStyle = '#4c7c38';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Subtle grass pattern blades
+            ctx.fillStyle = '#437030';
+            for (let i = 20; i < canvas.width; i += 80) {
+                for (let j = 20; j < canvas.height; j += 70) {
+                    ctx.fillRect(i, j, 4, 8);
+                    ctx.fillRect(i + 6, j + 3, 4, 5);
+                }
+            }
+
+            // 2. Draw Tilled Fields & Advanced Plant Stages
+            farmPlots.forEach(plot => {
+                if (plot.status === 'grass') {
+                    ctx.fillStyle = '#53863e';
+                    ctx.fillRect(plot.x, plot.y, TILE_SIZE - 2, TILE_SIZE - 2);
+                } else {
+                    // Rich multi-toned dirt textures
+                    ctx.fillStyle = plot.watered ? '#3a2312' : '#513824';
+                    ctx.fillRect(plot.x, plot.y, TILE_SIZE - 2, TILE_SIZE - 2);
+                    
+                    // Dark inner dirt trim for a 3D bevel look
+                    ctx.fillStyle = plot.watered ? '#27170a' : '#3e2a1a';
+                    ctx.fillRect(plot.x + 2, plot.y + 2, TILE_SIZE - 6, 3);
+                    ctx.fillRect(plot.x + 2, plot.y + 2, 3, TILE_SIZE - 6);
+                }
+                
+                // Detailed Plant Graphics
+                if (plot.status === 'planted') {
+                    let cx = plot.x + TILE_SIZE / 2;
+                    let cy = plot.y + TILE_SIZE / 2;
+
+                    if (plot.growth < 25) {
+                        // PHASE 1: Freshly Planted Seed Dots
+                        ctx.fillStyle = '#e67e22';
+                        ctx.fillRect(cx - 3, cy + 4, 3, 3);
+                        ctx.fillRect(cx + 4, cy - 2, 2, 2);
+                    } 
+                    else if (plot.growth < 60) {
+                        // PHASE 2: Young Sprouted Leaf
+                        ctx.fillStyle = '#2ecc71';
+                        // Stem
+                        ctx.fillRect(cx - 2, cy - 2, 4, 10);
+                        // Left leaf petal
+                        ctx.beginPath();
+                        ctx.ellipse(cx - 5, cy - 2, 4, 2, -Math.PI/4, 0, Math.PI * 2);
+                        ctx.fill();
+                        // Right leaf petal
+                        ctx.beginPath();
+                        ctx.ellipse(cx + 5, cy - 2, 4, 2, Math.PI/4, 0, Math.PI * 2);
+                        ctx.fill();
+                    } 
+                    else if (plot.growth < 95) {
+                        // PHASE 3: Thick Growing Bush Structure
+                        ctx.fillStyle = '#27ae60';
+                        ctx.fillRect(cx - 4, cy - 10, 8, 18);
+                        ctx.fillStyle = '#2ecc71';
+                        ctx.fillRect(cx - 7, cy - 4, 14, 8);
+                        ctx.fillRect(cx - 2, cy - 14, 4, 6);
+                    } 
+                    else {
+                        // PHASE 4: Fully Mature Golden Wheat Ready for Harvest
+                        let sway = Math.sin(Date.now() * 0.005 + plot.x) * 2; // Soft ambient organic wind sway
+                        
+                        ctx.strokeStyle = '#d35400';
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.moveTo(cx, cy + 16);
+                        ctx.quadraticCurveTo(cx + sway, cy, cx + sway * 1.5, cy - 10);
+                        ctx.stroke();
+
+                        // Golden grain stalks
+                        ctx.fillStyle = '#f1c40f';
+                        ctx.beginPath();
+                        ctx.arc(cx + sway * 1.5, cy - 12, 6, 0, Math.PI * 2);
+                        ctx.arc(cx + sway * 1.3, cy - 6, 5, 0, Math.PI * 2);
+                        ctx.arc(cx + sway * 1.7, cy, 5, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Bright highlight tip accents
+                        ctx.fillStyle = '#f39c12';
+                        ctx.fillRect(cx + sway * 1.5 - 2, cy - 16, 4, 4);
+                    }
+                }
+            });
+
+            // 3. Draw High-Detail Stylized Character Sprite
+            let px = player.x;
+            let py = player.y;
+            let pw = player.width;
+            let ph = player.height;
+
+            // Simple body bobbing/sway calculation during movement loop
+            let walkCycle = player.isMoving ? Math.sin(player.animTimer) : 0;
+            let bobOffset = player.isMoving ? Math.abs(Math.sin(player.animTimer)) * 3 : 0;
+
+            // Draw drop shadow under the feet
+            ctx.fillStyle = 'rgba(0,0,0,0.25)';
+            ctx.beginPath();
+            ctx.ellipse(px + pw/2, py + ph - 2, pw/2 + 2, 5, 0, 0, Math.PI*2);
+            ctx.fill();
+
+            // Dynamic Moving Legs
+            ctx.fillStyle = '#1a252f'; // Dark utility boots
+            let leftLegY = py + ph - 8 + (player.isMoving ? walkCycle * 4 : 0);
+            let rightLegY = py + ph - 8 + (player.isMoving ? -walkCycle * 4 : 0);
+            ctx.fillRect(px + 4, leftLegY, 7, 8);
+            ctx.fillRect(px + pw - 11, rightLegY, 7, 8);
+
+            // Blue Denim Overalls Body Torso
+            ctx.fillStyle = '#2980b9';
+            ctx.fillRect(px + 3, py + 14 + bobOffset, pw - 6, 20);
+
+            // Yellow/Red Plannel Checkered Shirt Arms & Shoulders
+            ctx.fillStyle = '#d35400';
+            ctx.fillRect(px + 1, py + 14 + bobOffset, pw - 2, 8); // Shoulders
+            // Dynamic swinging arms
+            let armSway = player.isMoving ? walkCycle * 5 : 0;
+            ctx.fillRect(px - 1, py + 16 + bobOffset + armSway, 4, 10); // Left Arm
+            ctx.fillRect(px + pw - 3, py + 16 + bobOffset - armSway, 4, 10); // Right Arm
+
+            // Denim Overalls Straps Accent lines
+            ctx.fillStyle = '#1f618d';
+            ctx.fillRect(px + 6, py + 14 + bobOffset, 3, 8);
+            ctx.fillRect(px + pw - 9, py + 14 + bobOffset, 3, 8);
+
+            // Leather Tool Belt
+            ctx.fillStyle = '#a0522d';
+            ctx.fillRect(px + 3, py + 26 + bobOffset, pw - 6, 3);
+            ctx.fillStyle = '#f1c40f'; // Gold Belt Buckle
+            ctx.fillRect(px + pw/2 - 3, py + 25 + bobOffset, 6, 5);
+
+            // Character Peach Skin Head Face
+            ctx.fillStyle = '#ffdbac';
+            ctx.fillRect(px + pw/2 - 7, py + 2 + bobOffset, 14, 13);
+
+            // Simple Dot Eyes (Looks where player is walking)
+            ctx.fillStyle = '#2c3e50';
+            if (player.facingLeft) {
+                ctx.fillRect(px + pw/2 - 5, py + 7 + bobOffset, 2, 3);
+                ctx.fillRect(px + pw/2 - 1, py + 7 + bobOffset, 2, 3);
+            } else {
+                ctx.fillRect(px + pw/2, py + 7 + bobOffset, 2, 3);
+                ctx.fillRect(px + pw/2 + 4, py + 7 + bobOffset, 2, 3);
+            }
+
+            // Big Straw Hat Brim Architecture
+            ctx.fillStyle = '#e67e22'; // Straw shadows
+            ctx.fillRect(px - 5, py + 1 + bobOffset, pw + 10, 4);
+            ctx.fillStyle = '#f1c40f'; // Straw hat main
+            ctx.fillRect(px - 5, py - 1 + bobOffset, pw + 10, 2);
+            ctx.fillRect(px + 3, py - 6 + bobOffset, pw - 6, 5);
+            // Red hat decoration band
+            ctx.fillStyle = '#e74c3c';
+            ctx.fillRect(px + 3, py - 2 + bobOffset, pw - 6, 2);
+        }
+
+        function gameLoop() {
+            update();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        updateUI();
+        gameLoop();
+    </script>
+</body>
+</html>
